@@ -1,0 +1,12 @@
+[package]
+name = "ferrumcompare"
+description = "Folder comparison command line"
+build = "../ferrumcompare-gui/build.rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fc-core.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }

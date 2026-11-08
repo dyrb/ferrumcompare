@@ -1,0 +1,31 @@
+# Build output and release packages
+/target/
+/dist/
+
+# Files written by the applications
+FerrumCompare.ini
+*.ftc
+*.tmp
+
+# Local development files
+/ROADMAP.md
+/scratchpad/
+/.codex/
+/.claude/
+/.agents/
+/.idea/
+/.vscode/
+*.log
+*.dmp
+*.bak
+*.orig
+*.rej
+
+# Disk images used during development
+*.img
+*.vhd
+*.vhdx
+
+# Windows shell metadata
+Thumbs.db
+Desktop.ini

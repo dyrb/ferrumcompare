@@ -1,0 +1,11 @@
+[package]
+name = "fc-core"
+description = "Read-only folder and text comparison engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ft-ntfs.workspace = true
+windows-sys.workspace = true
