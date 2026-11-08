@@ -353,7 +353,7 @@ fn parse(bytes: &[u8]) -> Result<Vec<PathBuf>, Reason> {
             return Err(Reason::Count);
         }
         let units = if wide {
-            bytes[start..p].chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>()
+            bytes[start..p].as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect::<Vec<_>>()
         } else {
             let input = &bytes[start..p];
             let n = unsafe { MultiByteToWideChar(CP_ACP, 0, input.as_ptr(), input.len() as i32, null_mut(), 0) };
