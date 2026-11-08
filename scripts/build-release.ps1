@@ -25,10 +25,10 @@ try {
     }
     if (-not $iconSource -or -not (Test-Path -LiteralPath $iconSource -PathType Leaf)) { throw 'Application icon was not generated' }
     Copy-Item -LiteralPath $iconSource -Destination (Join-Path $destination 'FerrumCompare.ico') -Force
-    foreach ($file in 'LICENSE-MIT','LICENSE-APACHE') {
+    foreach ($file in 'LICENSE-MIT','LICENSE-APACHE','THIRD_PARTY_NOTICES.md') {
         Copy-Item -LiteralPath (Join-Path $projectRoot $file) -Destination $destination -Force
     }
-    $archiveFiles = @('ferrumcompare.exe', 'ferrumcompare-gui.exe', 'FerrumCompare.ico', 'LICENSE-MIT', 'LICENSE-APACHE') |
+    $archiveFiles = @('ferrumcompare.exe', 'ferrumcompare-gui.exe', 'FerrumCompare.ico', 'LICENSE-MIT', 'LICENSE-APACHE', 'THIRD_PARTY_NOTICES.md') |
         ForEach-Object { [pscustomobject]@{ Source = Join-Path $destination $_; Name = $_ } }
     foreach ($file in 'README.md', 'README.ru.md', 'CHANGELOG.md') {
         $source = Join-Path $projectRoot $file

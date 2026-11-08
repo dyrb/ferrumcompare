@@ -4,12 +4,10 @@ use crate::{
     util::*,
 };
 use fc_core::{Backend, Case, NONE, Options, Progress};
-use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::Ordering::Relaxed};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::{ClientToScreen, InvalidateRect};
-use windows_sys::Win32::UI::Controls::Dialogs::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const EXPORT: u32 = 300;
@@ -290,10 +288,12 @@ pub fn browse(side: usize) {
         return;
     }
     let field = if side == 0 { w.left } else { w.right };
-    match crate::shell::choose_folder(w.main, &edit_path(field), t(S::Choose)) {
-        Ok(Some(path)) => set_path(field, &path),
-        Ok(None) => {}
-        Err(e) => message(w.main, &lang::error(&e), true),
+    let initial = edit_path(field);
+    if let Some((path, _)) = choose_dialog(
+        w.main,
+        crate::dialog::Options { kind: crate::dialog::Kind::Folder, title: t(S::Choose), initial: Some(&initial), ..Default::default() },
+    ) {
+        set_path(field, &path);
     }
 }
 
@@ -317,55 +317,51 @@ pub fn activate(index: usize) {
     if let Some((h, paths)) = selected { crate::viewer::open(h, paths) } else { crate::list::toggle(index) }
 }
 
+fn choose_dialog(owner: HWND, options: crate::dialog::Options<'_>) -> Option<(PathBuf, u32)> {
+    match crate::dialog::show(owner, options) {
+        Ok(result) => result,
+        Err(code) => {
+            let error = std::io::Error::other(format!("file dialog failed: 0x{:08X}", code as u32));
+            message(owner, &lang::error(&error), true);
+            None
+        }
+    }
+}
+
 fn open_files() {
-    let Some(owner) = with(|a| a.w.main) else { return };
+    let Some(w) = with(|a| a.w) else { return };
     let mut paths = [None, None];
     for (side, path) in paths.iter_mut().enumerate() {
-        let mut buffer = vec![0u16; 32768];
-        let filter = wide(&format!("{}\0*.*\0", t(S::AllFiles)));
-        let title = wide(&format!("{} {}", t(S::ChooseFile), t(if side == 0 { S::Left } else { S::Right })));
-        let mut dialog: OPENFILENAMEW = unsafe { std::mem::zeroed() };
-        dialog.lStructSize = size_of::<OPENFILENAMEW>() as u32;
-        dialog.hwndOwner = owner;
-        dialog.lpstrFile = buffer.as_mut_ptr();
-        dialog.nMaxFile = buffer.len() as u32;
-        dialog.lpstrFilter = filter.as_ptr();
-        dialog.lpstrTitle = title.as_ptr();
-        dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-        if unsafe { GetOpenFileNameW(&mut dialog) } == 0 {
+        let title = format!("{} {}", t(S::ChooseFile), t(if side == 0 { S::Left } else { S::Right }));
+        let initial = edit_path(if side == 0 { w.left } else { w.right });
+        let Some((selected, _)) = choose_dialog(
+            w.main,
+            crate::dialog::Options { title: &title, initial: Some(&initial), filters: &[(t(S::AllFiles), "*.*")], ..Default::default() },
+        ) else {
             return;
-        }
-        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-        *path = Some(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len])));
+        };
+        *path = Some(selected);
     }
-    crate::viewer::open(owner, paths);
+    crate::viewer::open(w.main, paths);
 }
 
 fn export() {
     let Some((w, pair, busy)) = with(|a| (a.w, a.pair.clone(), a.busy())) else { return };
     let Some(pair) = pair.filter(|_| !busy) else { return };
-    let mut buffer = vec![0u16; 32768];
-    let name = wide("comparison.csv");
-    buffer[..name.len()].copy_from_slice(&name);
-    let filter = wide("CSV (*.csv)\0*.csv\0JSON (*.json)\0*.json\0");
-    let title = wide(t(S::Save));
-    let extension = wide("csv");
-    let mut dialog: OPENFILENAMEW = unsafe { std::mem::zeroed() };
-    dialog.lStructSize = size_of::<OPENFILENAMEW>() as u32;
-    dialog.hwndOwner = w.main;
-    dialog.lpstrFilter = filter.as_ptr();
-    dialog.nFilterIndex = 1;
-    dialog.lpstrFile = buffer.as_mut_ptr();
-    dialog.nMaxFile = buffer.len() as u32;
-    dialog.lpstrTitle = title.as_ptr();
-    dialog.lpstrDefExt = extension.as_ptr();
-    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if unsafe { GetSaveFileNameW(&mut dialog) } == 0 {
+    let Some((path, filter_index)) = choose_dialog(
+        w.main,
+        crate::dialog::Options {
+            kind: crate::dialog::Kind::Save { overwrite: false },
+            title: t(S::Save),
+            file_name: "comparison.csv",
+            filters: &[("CSV (*.csv)", "*.csv"), ("JSON (*.json)", "*.json")],
+            extension: "csv",
+            ..Default::default()
+        },
+    ) else {
         return;
-    }
-    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-    let path = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len]));
-    let json = dialog.nFilterIndex == 2 || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    };
+    let json = filter_index == 2 || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
     with(|a| a.exporting = true);
     crate::ui::enabled();
     unsafe {

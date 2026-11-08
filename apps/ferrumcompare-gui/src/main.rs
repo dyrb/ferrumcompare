@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 mod app;
 mod cmds;
+mod dialog;
 mod drop_target;
 mod lang;
 mod list;

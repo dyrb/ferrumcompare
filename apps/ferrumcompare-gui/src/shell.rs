@@ -1,4 +1,4 @@
-//! Native folder selection and Explorer context menus. The item's `IContextMenu` is taken
+//! Explorer context menus. The item's `IContextMenu` is taken
 //! from its parent shell folder. windows-sys has no COM interfaces,
 //! so the few vtable slots used here are declared by hand.
 //!
@@ -7,20 +7,16 @@
 
 use std::cell::Cell;
 use std::ffi::c_void;
-use std::io;
-use std::os::windows::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{E_POINTER, ERROR_CANCELLED, HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows_sys::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Controls::ODT_MENU;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 use windows_sys::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows_sys::Win32::UI::Shell::{
-    CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
-    FOS_DONTADDTORECENT, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, GCS_VERBW,
-    SHBindToParent, SHCreateItemFromParsingName, SHParseDisplayName, SIGDN_FILESYSPATH,
+    CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN, CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX, GCS_VERBW,
+    SHBindToParent, SHParseDisplayName,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, HMENU, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_DRAWITEM, WM_INITMENUPOPUP,
@@ -28,14 +24,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::{GUID, HRESULT};
 
-use crate::util::{path_wide, wide};
+use crate::util::wide;
 
 const IID_ISHELLFOLDER: GUID = GUID::from_u128(0x000214E6_0000_0000_C000_000000000046);
 const IID_ICONTEXTMENU: GUID = GUID::from_u128(0x000214E4_0000_0000_C000_000000000046);
 const IID_ICONTEXTMENU2: GUID = GUID::from_u128(0x000214F4_0000_0000_C000_000000000046);
 const IID_ICONTEXTMENU3: GUID = GUID::from_u128(0xBCFCE0A0_EC17_11D0_8D10_00A0C90F2719);
-const IID_IFILEOPENDIALOG: GUID = GUID::from_u128(0xD57C7288_D4AD_4768_BE02_9D969532D960);
-const IID_ISHELLITEM: GUID = GUID::from_u128(0x43826D1E_E718_42EE_BC55_A1E261C37BFE);
 
 /// `CMIC_MASK_UNICODE` (missing from windows-sys): `lpVerbW` and friends are valid.
 const CMIC_MASK_UNICODE: u32 = 0x4000;
@@ -59,32 +53,6 @@ struct ShellFolderVtbl {
     _other: [usize; 7],
     get_ui_object_of:
         unsafe extern "system" fn(*mut c_void, HWND, u32, *const *const ITEMIDLIST, *const GUID, *mut u32, *mut *mut c_void) -> HRESULT,
-}
-
-#[repr(C)]
-struct FileDialogVtbl {
-    unknown: UnknownVtbl,
-    show: unsafe extern "system" fn(*mut c_void, HWND) -> HRESULT,
-    /// SetFileTypes .. Unadvise (slots 4..=8), unused.
-    _filters: [usize; 5],
-    set_options: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    get_options: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    _set_default_folder: usize,
-    set_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    /// GetFolder .. GetFileName (slots 13..=16), unused.
-    _selection: [usize; 4],
-    set_title: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
-    _labels: [usize; 2],
-    get_result: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-}
-
-#[repr(C)]
-struct ShellItemVtbl {
-    unknown: UnknownVtbl,
-    _bind_to_handler: usize,
-    get_parent: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    get_display_name: unsafe extern "system" fn(*mut c_void, i32, *mut *mut u16) -> HRESULT,
-    get_attributes: unsafe extern "system" fn(*mut c_void, u32, *mut u32) -> HRESULT,
 }
 
 /// IContextMenu, extended by IContextMenu2 (`handle_menu_msg`) and IContextMenu3
@@ -131,78 +99,6 @@ impl Drop for Pidl {
     fn drop(&mut self) {
         // SAFETY: allocated by SHParseDisplayName.
         unsafe { CoTaskMemFree(self.0.cast()) };
-    }
-}
-
-fn dialog_check(hr: HRESULT) -> io::Result<()> {
-    if hr < 0 { Err(io::Error::other(format!("folder dialog failed: 0x{:08X}", hr as u32))) } else { Ok(()) }
-}
-
-fn dialog_object(hr: HRESULT, raw: *mut c_void) -> io::Result<Com> {
-    dialog_check(hr)?;
-    dialog_check(if raw.is_null() { E_POINTER } else { 0 })?;
-    Ok(Com(raw))
-}
-
-/// The caller runs in the UI thread's OLE apartment. Cancellation leaves its path unchanged.
-pub fn choose_folder(owner: HWND, initial: &Path, title: &str) -> io::Result<Option<PathBuf>> {
-    // SAFETY: interface layouts follow the Windows SDK; every owned interface is released
-    // by Com. The modal dialog runs without an outstanding borrow of application state.
-    unsafe {
-        let mut raw = null_mut();
-        let hr = CoCreateInstance(&FileOpenDialog, null_mut(), CLSCTX_INPROC_SERVER, &IID_IFILEOPENDIALOG, &mut raw);
-        let dialog = dialog_object(hr, raw)?;
-        let vt = dialog.vt::<FileDialogVtbl>();
-        let mut options = 0;
-        dialog_check((vt.get_options)(dialog.0, &mut options))?;
-        dialog_check((vt.set_options)(
-            dialog.0,
-            options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT,
-        ))?;
-        let title = wide(title);
-        dialog_check((vt.set_title)(dialog.0, title.as_ptr()))?;
-
-        // A stale path must not prevent browsing. For an existing file, start in its parent.
-        if !initial.as_os_str().is_empty() {
-            let path = path_wide(initial);
-            let mut item = null_mut();
-            if SHCreateItemFromParsingName(path.as_ptr(), null_mut(), &IID_ISHELLITEM, &mut item) >= 0 && !item.is_null() {
-                let item = Com(item);
-                let ivt = item.vt::<ShellItemVtbl>();
-                let mut attrs = 0;
-                const SFGAO_FOLDER: u32 = 0x20000000;
-                if (ivt.get_attributes)(item.0, SFGAO_FOLDER, &mut attrs) >= 0 {
-                    if attrs & SFGAO_FOLDER != 0 {
-                        (vt.set_folder)(dialog.0, item.0);
-                    } else {
-                        let mut parent = null_mut();
-                        if (ivt.get_parent)(item.0, &mut parent) >= 0 && !parent.is_null() {
-                            let parent = Com(parent);
-                            (vt.set_folder)(dialog.0, parent.0);
-                        }
-                    }
-                }
-            }
-        }
-
-        let hr = (vt.show)(dialog.0, owner);
-        if hr == (0x80070000 | ERROR_CANCELLED) as HRESULT {
-            return Ok(None);
-        }
-        dialog_check(hr)?;
-        let mut raw = null_mut();
-        let hr = (vt.get_result)(dialog.0, &mut raw);
-        let item = dialog_object(hr, raw)?;
-        let mut name = null_mut();
-        dialog_check((item.vt::<ShellItemVtbl>().get_display_name)(item.0, SIGDN_FILESYSPATH, &mut name))?;
-        dialog_check(if name.is_null() { E_POINTER } else { 0 })?;
-        let mut len = 0;
-        while *name.add(len) != 0 {
-            len += 1;
-        }
-        let path = PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(name, len)));
-        CoTaskMemFree(name.cast());
-        Ok(Some(path))
     }
 }
 

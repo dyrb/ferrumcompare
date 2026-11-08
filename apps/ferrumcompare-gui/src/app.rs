@@ -198,7 +198,7 @@ impl App {
 
     pub fn footer(&self) -> String {
         if self.pair.is_none() {
-            return "FerrumCompare 0.1.0".into();
+            return concat!("FerrumCompare ", env!("CARGO_PKG_VERSION")).into();
         }
         let s = &self.summary;
         let mut text = format!(

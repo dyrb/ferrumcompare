@@ -13,7 +13,7 @@ pub fn ru() -> bool {
     }
 }
 macro_rules! strings {
-    ($($id:ident = $en:literal, $ru:literal;)*) => {
+    ($($id:ident = $en:expr, $ru:expr;)*) => {
         #[derive(Clone, Copy)] pub enum S { $($id,)* }
         pub fn t(s: S) -> &'static str { match s { $(S::$id => if ru() { $ru } else { $en },)* } }
     };
@@ -136,8 +136,8 @@ strings! {
     Save = "Save report", "Сохранить отчёт";
     Saved = "Report saved", "Отчёт сохранён";
     ExportBusy = "Exporting report", "Экспорт отчёта";
-    AboutText = "FerrumCompare 0.1.0\nRead-only folder and text comparison.\nContent checking covers unnamed file data. Reparse points are compared without traversal. ACLs and alternate streams are not compared.\nF5: compare folders. Escape: stop. Double-click a file: compare text.\nText window: F7 / Shift+F7: next / previous change. Ctrl+F: find.\n\nBased on FerrumTree. MIT OR Apache-2.0.",
-        "FerrumCompare 0.1.0\nСравнение папок и текста без изменения исходных файлов.\nПроверяется основной поток данных файлов. Точки повторного анализа сравниваются без перехода по ним. Права доступа и альтернативные потоки не сравниваются.\nF5: сравнить папки. Escape: остановить. Двойной щелчок по файлу: сравнить текст.\nВ окне текста: F7 / Shift+F7: следующее / предыдущее различие. Ctrl+F: поиск.\n\nНа основе FerrumTree. MIT OR Apache-2.0.";
+    AboutText = concat!("FerrumCompare ", env!("CARGO_PKG_VERSION"), "\nRead-only folder and text comparison.\nContent checking covers unnamed file data. Reparse points are compared without traversal. ACLs and alternate streams are not compared.\nF5: compare folders. Escape: stop. Double-click a file: compare text.\nText window: F7 / Shift+F7: next / previous change. Ctrl+F: find.\n\nBased on FerrumTree. MIT OR Apache-2.0."),
+        concat!("FerrumCompare ", env!("CARGO_PKG_VERSION"), "\nСравнение папок и текста без изменения исходных файлов.\nПроверяется основной поток данных файлов. Точки повторного анализа сравниваются без перехода по ним. Права доступа и альтернативные потоки не сравниваются.\nF5: сравнить папки. Escape: остановить. Двойной щелчок по файлу: сравнить текст.\nВ окне текста: F7 / Shift+F7: следующее / предыдущее различие. Ctrl+F: поиск.\n\nНа основе FerrumTree. MIT OR Apache-2.0.");
 }
 
 pub fn state(s: State) -> &'static str {
@@ -192,8 +192,8 @@ pub fn error(e: &std::io::Error) -> String {
     if let Some(code) = e.to_string().strip_prefix("OLE drop registration failed: ") {
         return format!("Не удалось включить перетаскивание: {code}");
     }
-    if let Some(code) = e.to_string().strip_prefix("folder dialog failed: ") {
-        return format!("Не удалось открыть окно выбора папки: {code}");
+    if let Some(code) = e.to_string().strip_prefix("file dialog failed: ") {
+        return format!("Не удалось открыть диалог выбора файла или папки: {code}");
     }
     match e.to_string().as_str() {
         "archive contents are not supported" => t(S::DropArchive).into(),

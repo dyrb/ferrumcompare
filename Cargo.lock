@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "fc-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ft-ntfs",
  "windows-sys",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "ferrumcompare"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fc-core",
  "windows-sys",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "ferrumcompare-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fc-core",
  "windows-sys",
@@ -28,7 +28,7 @@ dependencies = [
 
 [[package]]
 name = "ft-ntfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "windows-sys",
 ]
